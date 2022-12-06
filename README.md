@@ -1,6 +1,9 @@
-# modified version of original mmdetection project for NIA_ripcurrent detection
-Modified by DooHwanSon, UST21
+# modified version of original mmdetection project for NIA_ripcurrent_detection
 
+Modified by DooHwanSon, UST21
+Mainly used Mask-RCNN with Swin-Transformer backbone
+
+# Original README
 <div align="center">
   <img src="resources/mmdet-logo.png" width="600"/>
   <div>&nbsp;</div>
