@@ -205,7 +205,13 @@ def draw_masks(ax, img, masks, color=None, with_edge=True, alpha=0.8):
     return ax, img
 
 
+#  =============================================================================
+#  =============================================================================
+#  =============================================================================
+
+
 def imshow_det_bboxes(img,
+                      test_return_img_when_rip=False,
                       bboxes=None,
                       labels=None,
                       segms=None,
@@ -224,6 +230,7 @@ def imshow_det_bboxes(img,
 
     Args:
         img (str | ndarray): The image to be displayed.
+        test_return_img_when_rip (bool) : whether retrun rip image only
         bboxes (ndarray): Bounding boxes (with scores), shaped (n, 4) or
             (n, 5).
         labels (ndarray): Labels of bboxes.
@@ -272,6 +279,11 @@ def imshow_det_bboxes(img,
         inds = scores > score_thr
         bboxes = bboxes[inds, :]
         labels = labels[inds]
+        
+        # config 파일에서 1있는것만 return할지 여부 결정
+        if test_return_img_when_rip and (1 not in labels):
+            return [], bboxes, labels
+
         if segms is not None:
             segms = segms[inds, ...]
 
@@ -305,9 +317,10 @@ def imshow_det_bboxes(img,
 
         horizontal_alignment = 'left'
         positions = bboxes[:, :2].astype(np.int32) + thickness
-        areas = (bboxes[:, 3] - bboxes[:, 1]) * (bboxes[:, 2] - bboxes[:, 0])
+        areas = (bboxes[:, 3] - bboxes[:, 1]) * (bboxes[:, 2] - bboxes[:, 0])  # 
         scales = _get_adaptive_scales(areas)
         scores = bboxes[:, 4] if bboxes.shape[1] == 5 else None
+
         draw_labels(
             ax,
             labels[:num_bboxes],
@@ -374,12 +387,16 @@ def imshow_det_bboxes(img,
 
     plt.close()
 
-    return img
+    return img, bboxes, labels
 
+#  =============================================================================
+#  =============================================================================
+#  =============================================================================
 
 def imshow_gt_det_bboxes(img,
                          annotation,
                          result,
+                         test_return_img_when_rip,
                          class_names=None,
                          score_thr=0,
                          gt_bbox_color=(61, 102, 255),
@@ -467,12 +484,14 @@ def imshow_gt_det_bboxes(img,
         # gt_bboxes = None
 
     img = mmcv.imread(img)
-
-    img_with_gt = imshow_det_bboxes(
+    # 아래 함수: img에 bboxes, label을 표기한 후 img, bboxes, labels를 return함
+    # GT 먼저 그림
+    img_with_gt, _, _ = imshow_det_bboxes(
         img,
+        test_return_img_when_rip,
         gt_bboxes,
         gt_labels,
-        gt_masks,
+        # gt_masks,/
         class_names=class_names,
         bbox_color=gt_bbox_color,
         text_color=gt_text_color,
@@ -498,10 +517,10 @@ def imshow_gt_det_bboxes(img,
         labels = np.concatenate(labels)
 
         segms = None
-        if segm_result is not None and len(labels) > 0:  # non empty
-            segms = mmcv.concat_list(segm_result)
-            segms = mask_util.decode(segms)
-            segms = segms.transpose(2, 0, 1)
+        # if segm_result is not None and len(labels) > 0:  # non empty
+        #     segms = mmcv.concat_list(segm_result)
+        #     segms = mask_util.decode(segms)
+        #     segms = segms.transpose(2, 0, 1)
     else:
         assert class_names is not None, 'We need to know the number ' \
                                         'of classes.'
@@ -515,12 +534,14 @@ def imshow_gt_det_bboxes(img,
         labels = np.array([id % INSTANCE_OFFSET for id in ids], dtype=np.int64)
         segms = (pan_results[None] == ids[:, None, None])
 
-    if overlay_gt_pred:
-        img = imshow_det_bboxes(
+    # 먼저 그린 GT외에 prediction 결과 그림
+    if overlay_gt_pred:  # 한그림에 둘 다 그릴지
+        img, final_bboxes, final_labels = imshow_det_bboxes(
             img_with_gt,
+            test_return_img_when_rip,
             bboxes,
             labels,
-            segms=segms,
+            # segms=segms,
             class_names=class_names,
             score_thr=score_thr,
             bbox_color=det_bbox_color,
@@ -532,9 +553,10 @@ def imshow_gt_det_bboxes(img,
             show=show,
             wait_time=wait_time,
             out_file=out_file)
-    else:
-        img_with_det = imshow_det_bboxes(
+    else:  # 각기 다른 figure에 gt, pred 그릴지?
+        img_with_det, final_bboxes, final_labels = imshow_det_bboxes(
             img,
+            test_return_img_when_rip,
             bboxes,
             labels,
             segms=segms,
@@ -560,4 +582,4 @@ def imshow_gt_det_bboxes(img,
             mmcv.imwrite(img, out_file)
         plt.close()
 
-    return img
+    return img, final_bboxes, final_labels

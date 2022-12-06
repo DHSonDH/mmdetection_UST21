@@ -172,6 +172,8 @@ def tpfp_default(det_bboxes,
                  iou_thr=0.5,
                  area_ranges=None,
                  use_legacy_coordinate=False,
+                 obj_class=0,
+                 annotations = 0,
                  **kwargs):
     """Check if detected bboxes are true positive or false positive.
 
@@ -206,7 +208,7 @@ def tpfp_default(det_bboxes,
          np.ones(gt_bboxes_ignore.shape[0], dtype=np.bool)))
     # stack gt_bboxes and gt_bboxes_ignore for convenience
     gt_bboxes = np.vstack((gt_bboxes, gt_bboxes_ignore))
-
+    
     num_dets = det_bboxes.shape[0]
     num_gts = gt_bboxes.shape[0]
     if area_ranges is None:
@@ -237,6 +239,7 @@ def tpfp_default(det_bboxes,
     # for each det, which gt overlaps most with it
     ious_argmax = ious.argmax(axis=1)
     # sort all dets in descending order by scores
+
     sort_inds = np.argsort(-det_bboxes[:, -1])
     for k, (min_area, max_area) in enumerate(area_ranges):
         gt_covered = np.zeros(num_gts, dtype=bool)
@@ -485,11 +488,15 @@ def get_cls_results(det_results, annotations, class_id):
     Returns:
         tuple[list[np.ndarray]]: detected bboxes, gt bboxes, ignored gt bboxes
     """
-    cls_dets = [img_res[class_id] for img_res in det_results]
+    # cls_dets = [img_res[class_id] for img_res in det_results]  # default 
+    # cls_dets2 = [img_res[0] for img_res in det_results]  # 모든 class 포함함. 
+    # cls_dets = [img_res[0][class_id] for img_res in det_results]  # my revision but 같은라벨 여러 bbox인걸 대응 못함
+    cls_dets = [np.array(img_res[0][class_id]) for img_res in det_results]  # my revision but 같은라벨 여러 bbox인걸 대응 못함
+    n_dets_per_img = [len(img_res[0][class_id]) for img_res in det_results]
     cls_gts = []
     cls_gts_ignore = []
     for ann in annotations:
-        gt_inds = ann['labels'] == class_id
+        gt_inds = ann['labels'] == class_id  # 한 이미지에 존재하는 모든 obj들 중에 대상 class만 뽑는 것.
         cls_gts.append(ann['bboxes'][gt_inds, :])
 
         if ann.get('labels_ignore', None) is not None:
@@ -498,7 +505,7 @@ def get_cls_results(det_results, annotations, class_id):
         else:
             cls_gts_ignore.append(np.empty((0, 4), dtype=np.float32))
 
-    return cls_dets, cls_gts, cls_gts_ignore
+    return cls_dets, n_dets_per_img, cls_gts, cls_gts_ignore
 
 
 def get_cls_group_ofs(annotations, class_id):
@@ -584,7 +591,9 @@ def eval_map(det_results,
 
     num_imgs = len(det_results)
     num_scales = len(scale_ranges) if scale_ranges is not None else 1
-    num_classes = len(det_results[0])  # positive class num
+    num_classes = len(dataset) #FIXME original : len(det_results[0])  
+    # 밑에서 for i in range(num_classes) 한다는 것은 이미지에서 탐색된 positive class 만 보는게 아님.
+    
     area_ranges = ([(rg[0]**2, rg[1]**2) for rg in scale_ranges]
                    if scale_ranges is not None else None)
 
@@ -596,10 +605,11 @@ def eval_map(det_results,
         pool = Pool(nproc)
 
     eval_results = []
-    for i in range(num_classes):
+    for i in range(num_classes):  # 0부터 쭉 돈다는 말은 모든 class를 탐색하겠다는 거지.
         # get gt and det bboxes of this class
-        cls_dets, cls_gts, cls_gts_ignore = get_cls_results(
+        cls_dets, n_dets_per_img, cls_gts, cls_gts_ignore = get_cls_results(
             det_results, annotations, i)
+        # output : tuple[list[np.ndarray]]: detected bboxes, gt bboxes, ignored gt bboxes
         # choose proper function according to datasets to compute tp and fp
         if tpfp_fn is None:
             if dataset in ['det', 'vid']:
@@ -629,7 +639,10 @@ def eval_map(det_results,
                 zip(cls_dets, cls_gts, cls_gts_ignore,
                     [iou_thr for _ in range(num_imgs)],
                     [area_ranges for _ in range(num_imgs)],
-                    [use_legacy_coordinate for _ in range(num_imgs)], *args))
+                    [use_legacy_coordinate for _ in range(num_imgs)],
+                    [i for _ in range(num_imgs)],  # FIXME: class index 추가한거 지우기
+                    [annotations[idx] for idx in range(num_imgs)]  # FIXME: label 추가한거 지우기
+                    , *args))
         else:
             tpfp = tpfp_fn(
                 cls_dets[0],
@@ -664,6 +677,14 @@ def eval_map(det_results,
         cls_dets = np.vstack(cls_dets)
         num_dets = cls_dets.shape[0]
         sort_inds = np.argsort(-cls_dets[:, -1])
+        
+        if i == 1:
+            # import copy
+            n_det_Iwant = n_dets_per_img
+            tp_iwant = [item.sum() for item in tp]
+            fp_iwant = [item.sum() for item in fp]
+            
+
         tp = np.hstack(tp)[:, sort_inds]
         fp = np.hstack(fp)[:, sort_inds]
         # calculate recall and precision with tp and fp
@@ -686,6 +707,7 @@ def eval_map(det_results,
             'precision': precisions,
             'ap': ap
         })
+
 
     if num_imgs > 1:
         pool.close()
@@ -711,7 +733,7 @@ def eval_map(det_results,
     print_map_summary(
         mean_ap, eval_results, dataset, area_ranges, logger=logger)
 
-    return mean_ap, eval_results
+    return mean_ap, eval_results, n_det_Iwant, tp_iwant, fp_iwant
 
 
 def print_map_summary(mean_ap,

@@ -52,7 +52,7 @@ class StandardRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
         return outs
 
     def forward_train(self,
-                      x,
+                      x, x_obs,
                       img_metas,
                       proposal_list,
                       gt_bboxes,
@@ -101,7 +101,7 @@ class StandardRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
         losses = dict()
         # bbox head forward and loss
         if self.with_bbox:
-            bbox_results = self._bbox_forward_train(x, sampling_results,
+            bbox_results = self._bbox_forward_train(x, x_obs, sampling_results,
                                                     gt_bboxes, gt_labels,
                                                     img_metas)
             losses.update(bbox_results['loss_bbox'])
@@ -115,24 +115,44 @@ class StandardRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
 
         return losses
 
-    def _bbox_forward(self, x, rois):
+    def _bbox_forward(self, x, x_obs, rois, is_test=False, test_batch_bb_idx=None):
         """Box head forward function used in both training and testing."""
         # TODO: a more flexible way to decide which feature maps to use
         bbox_feats = self.bbox_roi_extractor(
-            x[:self.bbox_roi_extractor.num_inputs], rois)
+            x[:self.bbox_roi_extractor.num_inputs], rois)  # ROI Align 되고 pooling 됨 (batch size 뭉개짐)
+            # 하긴 batch element별로 roi 갯수가 다를텐데 한 어레이로 묶을 수 없었겠지
+            # ?? :self.bbox_roi_extractor.num_inputs 로 일부 선택하는게 무슨 의미지?
         if self.with_shared_head:
-            bbox_feats = self.shared_head(bbox_feats)
-        cls_score, bbox_pred = self.bbox_head(bbox_feats)
+            bbox_feats = self.shared_head(bbox_feats, x_obs)
+
+        if is_test:
+            x_obs = torch.stack([x_obs[i] for i in test_batch_bb_idx])
+            # !!! test시, 다른 이미지(다른annot)가 함께 섞인 1batch를 함부로 복제한다는게 말이 안되는 것임.
+            # test 시 simple_test_bboxes 함수의 proposals 변수가 가지는 batch의 각 index 별 bbox정보로
+            # test x_obs 매칭할 수 있게됨 >_< 
+            # train시 (바로 밑에 함수 _bbox_forward_train)에서 sampling 정보가 있어 이를 활용해 
+            # roi 번호의 몇번부터 몇번까지가 한 이미지에서 나왔는지 찾아서 matching함
+
+        cls_score, bbox_pred = self.bbox_head(bbox_feats, x_obs)  # cls_score에서 batch size다시 살아남 ?? ㄴㄴ
+        # batch size야 어떻든, 그 안에서 bbox가 안생기면 계산 적게하고, 많이 생기면 계산 많이하고 그렇게 바뀌는 것인듯.
+        # 다르게 얘기하면 각 batch 내에 한 이미지의 loss를 알기는 어려울듯
 
         bbox_results = dict(
             cls_score=cls_score, bbox_pred=bbox_pred, bbox_feats=bbox_feats)
         return bbox_results
 
-    def _bbox_forward_train(self, x, sampling_results, gt_bboxes, gt_labels,
+    def _bbox_forward_train(self, x, x_obs, sampling_results, gt_bboxes, gt_labels,
                             img_metas):
         """Run forward function and calculate loss for box head in training."""
         rois = bbox2roi([res.bboxes for res in sampling_results])
-        bbox_results = self._bbox_forward(x, rois)
+        
+        idxes = []  # roi 만들 때 각 roi 가 몇번째 batch element인지 정보 기록 가능
+        for i, res in enumerate(sampling_results):
+            idxes.extend([i for _ in range(res.bboxes.shape[0])])
+        x_obs = torch.stack([x_obs[i] for i in idxes])  # TODO : 이거 최적화 코딩이 맞는지?
+
+        # 16 x 512(1이미지에서 나오는 최대 roi 갯수인듯 .. .256아니었나? 암튼)
+        bbox_results = self._bbox_forward(x, x_obs, rois)
 
         bbox_targets = self.bbox_head.get_targets(sampling_results, gt_bboxes,
                                                   gt_labels, self.train_cfg)
@@ -221,7 +241,7 @@ class StandardRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
             return bbox_results, segm_results
 
     def simple_test(self,
-                    x,
+                    x, x_obs,
                     proposal_list,
                     img_metas,
                     proposals=None,
@@ -251,7 +271,7 @@ class StandardRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
         assert self.with_bbox, 'Bbox head must be implemented.'
 
         det_bboxes, det_labels = self.simple_test_bboxes(
-            x, img_metas, proposal_list, self.test_cfg, rescale=rescale)
+            x, x_obs, img_metas, proposal_list, self.test_cfg, rescale=rescale)
 
         bbox_results = [
             bbox2result(det_bboxes[i], det_labels[i],

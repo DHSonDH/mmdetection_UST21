@@ -1,4 +1,5 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+import torch
 import torch.nn as nn
 from mmcv.cnn import ConvModule
 
@@ -28,6 +29,7 @@ class ConvFCBBoxHead(BBoxHead):
                  num_reg_fcs=0,
                  conv_out_channels=256,
                  fc_out_channels=1024,
+                 multimodal_channels=1024+256,
                  conv_cfg=None,
                  norm_cfg=None,
                  init_cfg=None,
@@ -86,7 +88,7 @@ class ConvFCBBoxHead(BBoxHead):
                 cls_channels = self.num_classes + 1
             self.fc_cls = build_linear_layer(
                 self.cls_predictor_cfg,
-                in_features=self.cls_last_dim,
+                in_features= multimodal_channels,  #FIXME self.cls_last_dim,
                 out_features=cls_channels)
         if self.with_reg:
             out_dim_reg = (4 if self.reg_class_agnostic else 4 *
@@ -156,7 +158,7 @@ class ConvFCBBoxHead(BBoxHead):
             last_layer_dim = self.fc_out_channels
         return branch_convs, branch_fcs, last_layer_dim
 
-    def forward(self, x):
+    def forward(self, x, x_obs):
         # shared part
         if self.num_shared_convs > 0:
             for conv in self.shared_convs:
@@ -166,13 +168,13 @@ class ConvFCBBoxHead(BBoxHead):
             if self.with_avg_pool:
                 x = self.avg_pool(x)
 
-            x = x.flatten(1)
+            x = x.flatten(1)  # 맨 앞아닌 dimension을 flatten
 
             for fc in self.shared_fcs:
                 x = self.relu(fc(x))
         # separate branches
-        x_cls = x
-        x_reg = x
+        x_cls = torch.cat([x, x_obs], dim=1)  # ??X1024 + ??X256
+        x_reg = x  # ??x1024 얘는 관측자료 안합침
 
         for conv in self.cls_convs:
             x_cls = conv(x_cls)
@@ -180,7 +182,7 @@ class ConvFCBBoxHead(BBoxHead):
             if self.with_avg_pool:
                 x_cls = self.avg_pool(x_cls)
             x_cls = x_cls.flatten(1)
-        for fc in self.cls_fcs:
+        for fc in self.cls_fcs: 
             x_cls = self.relu(fc(x_cls))
 
         for conv in self.reg_convs:
@@ -189,7 +191,7 @@ class ConvFCBBoxHead(BBoxHead):
             if self.with_avg_pool:
                 x_reg = self.avg_pool(x_reg)
             x_reg = x_reg.flatten(1)
-        for fc in self.reg_fcs:
+        for fc in self.reg_fcs:  # 지금 config세팅으로는 아무 레이어 없음
             x_reg = self.relu(fc(x_reg))
 
         cls_score = self.fc_cls(x_cls) if self.with_cls else None
@@ -202,12 +204,12 @@ class Shared2FCBBoxHead(ConvFCBBoxHead):
 
     def __init__(self, fc_out_channels=1024, *args, **kwargs):
         super(Shared2FCBBoxHead, self).__init__(
-            num_shared_convs=0,
-            num_shared_fcs=2,
-            num_cls_convs=0,
-            num_cls_fcs=0,
-            num_reg_convs=0,
-            num_reg_fcs=0,
+            # num_shared_convs=0,
+            # num_shared_fcs=2,
+            # num_cls_convs=0,
+            # num_cls_fcs=0,
+            # num_reg_convs=0,
+            # num_reg_fcs=0,   # FIXME config file에서 수정하도록 함
             fc_out_channels=fc_out_channels,
             *args,
             **kwargs)

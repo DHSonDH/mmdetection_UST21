@@ -36,9 +36,18 @@ class Compose:
         Returns:
            dict: Transformed data.
         """
-
         for t in self.transforms:
             data = t(data)
+            # if type(t).__name__ == 'Resize':
+            # if type(t).__name__ != 'Collect':
+            #     try:
+            #         print(f"img_shape : {data['img_shape']}, pad_shape : {data['pad_shape']}")  
+            #         # image shape과 pad shape의 discrepancy. 특히 pad shape이 img_shape보다 작으면 error남. img_shape이 직사각형이라 짧은 부분이 문제가 됨. 
+            #         # reshape이던 crop이던 이미지 원본 가로세로 비율을 유지하면서 바뀌어서 직사각형이 되는 듯 함
+            #         # 따라서, 언제 이미지 reshape이 일어나는지, 이를 어떻게 바꾸면 될 지 고민하면 됨. 무조건 정사각형으로 바꾸면 일단은 해결 됨
+            #     except:
+            #         print(f"img_shape : {data['img_shape']}, org_shape : {data['ori_shape']}")  
+
             if data is None:
                 return None
         return data

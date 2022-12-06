@@ -32,7 +32,6 @@ def test_dense_heads_test_attr():
                 not_found[check_attribute].append(target_head_name)
         table_data.append(check_results)
     table = AsciiTable(table_data)
-    print()
     print(table.table)
 
     # NOTE: this test just checks attributes.

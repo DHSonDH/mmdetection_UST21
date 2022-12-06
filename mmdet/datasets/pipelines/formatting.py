@@ -344,8 +344,39 @@ class Collect:
         data['img_metas'] = DC(img_meta, cpu_only=True)
         for key in self.keys:
             data[key] = results[key]
+            data['obs'] = results['ann_info']['obs']
         return data
 
+        # if results['img_prefix'].split('/')[2] == 'train':
+        #     for key in self.keys:
+        #         data[key] = results[key]
+        #         data['obs'] = results['ann_info']['obs']
+        #     return data
+        # else:
+        #     for key in self.keys:
+        #         data[key] = results[key]
+        #         data['obs'] = results['ann_info']['obs']
+        #     return data
+
+        '''
+        if results['img_prefix'].split('/')[2] == 'train':
+            for key in self.keys:
+                data[key] = results[key]
+                data['obs'] = results['ann_info']['obs']
+            return data
+        else:
+            # test? val시 왜 results에 'ann_info'가 안생기는지? train시에는 생기는데 ...
+            # prepare_test_img 함수 내에서 ann_info 저장하는 코드가 없으므로.
+            # test시 config파일에 test_pipeline에 dict(type='LoadAnnotations', with_bbox=True, with_mask=True)가 없어서 그럼
+            
+            # validation 할 시 custom.py의 259 line prepare_test_img함수가 실행되면서 ann_info key생성을 안하므로 
+            # gt_머시기 key: class LoadAnnotations로 전처리할때 생성함
+            for key in self.keys:
+                data[key] = results[key]
+                data['obs'] = results['img_info']['ann']['obs']
+            return data
+        '''
+            
     def __repr__(self):
         return self.__class__.__name__ + \
                f'(keys={self.keys}, meta_keys={self.meta_keys})'

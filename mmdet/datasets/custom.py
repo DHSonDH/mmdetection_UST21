@@ -231,7 +231,37 @@ class CustomDataset(Dataset):
             dict: Training data and annotation after pipeline with new keys \
                 introduced by pipeline.
         """
+        prep_in_advance = False
+        # full 전처리 loadding 코드 ===========================================
+        if prep_in_advance:
+            import os, sys
+            import pickle
+            fullfile_path = './data/fullfile_10p_train.pkl'
+            if not os.path.exists(f'{fullfile_path}'):
+                # do full-preprocessing
+                fullfile = []
+                for idx in range(len(self.data_infos)):
+                    img_info = self.data_infos[idx]
+                    ann_info = self.get_ann_info(idx)
+                    results = dict(img_info=img_info, ann_info=ann_info)
+                    self.pre_pipeline(results)
+                    output = self.pipeline(results)
+                    fullfile.append(output)
+                with open('./data/fullfile_10p_train.pkl', 'wb') as f:
+                    pickle.dump(fullfile, f)
+                sys.exit("\n\n !!!!!  full-dataset prepared!")
 
+            else:
+                print('full-preprocessed file found')
+                with open('./data/fullfile_10p_train.pkl', 'rb') as f:
+                    fullfile = pickle.load(f)
+                img_info = fullfile[idx]
+                ann_info = fullfile[idx]
+                keys = ['img_metas', 'img', 'obs', 'gt_bboxes', 'gt_labels', 'gt_masks']
+                output = {key : fullfile[idx][key]  for key in keys}
+                # return output
+        # ===================================================================
+        # original batch 단위 데이터 loading, processing
         img_info = self.data_infos[idx]
         ann_info = self.get_ann_info(idx)
         results = dict(img_info=img_info, ann_info=ann_info)
@@ -253,6 +283,9 @@ class CustomDataset(Dataset):
 
         img_info = self.data_infos[idx]
         results = dict(img_info=img_info)
+        ann_info = self.get_ann_info(idx)  
+        # FIXME 바로 위에 prepare_train_img와 같이 변수구조 만듬
+        results = dict(img_info=img_info, ann_info=ann_info) 
         if self.proposals is not None:
             results['proposals'] = self.proposals[idx]
         self.pre_pipeline(results)
@@ -309,6 +342,8 @@ class CustomDataset(Dataset):
 
     def evaluate(self,
                  results,
+                 pkl_name=None,
+                 full_fname=None,
                  metric='mAP',
                  logger=None,
                  proposal_nums=(100, 300, 1000),
@@ -341,15 +376,18 @@ class CustomDataset(Dataset):
         if metric == 'mAP':
             assert isinstance(iou_thrs, list)
             mean_aps = []
+            #TODO: recall, precision, n_det iwant 들을 thrs별로 concat할까?
             for iou_thr in iou_thrs:
                 print_log(f'\n{"-" * 15}iou_thr: {iou_thr}{"-" * 15}')
-                mean_ap, _ = eval_map(
-                    results,
-                    annotations,
-                    scale_ranges=scale_ranges,
-                    iou_thr=iou_thr,
-                    dataset=self.CLASSES,
-                    logger=logger)
+                
+                # mean_ap, _ = eval_map(
+                mean_ap, eval_map_results, n_det_Iwant, tp_iwant, fp_iwant= \
+                            eval_map(results,
+                                    annotations,
+                                    scale_ranges=scale_ranges,
+                                    iou_thr=iou_thr,
+                                    dataset=self.CLASSES,
+                                    logger=logger)
                 mean_aps.append(mean_ap)
                 eval_results[f'AP{int(iou_thr * 100):02d}'] = round(mean_ap, 3)
             eval_results['mAP'] = sum(mean_aps) / len(mean_aps)
@@ -364,6 +402,15 @@ class CustomDataset(Dataset):
                 ar = recalls.mean(axis=1)
                 for i, num in enumerate(proposal_nums):
                     eval_results[f'AR@{num}'] = ar[i]
+        
+        # FIXME:
+        # import pickle
+        # with open(f'./N_PAG_POD_SWIN_{pkl_name}.pkl', 'wb') as fp:
+        #     pickle.dump(full_fname, fp)
+        #     pickle.dump(n_det_Iwant, fp)
+        #     pickle.dump(tp_iwant, fp)
+        #     pickle.dump(fp_iwant, fp)
+
         return eval_results
 
     def __repr__(self):

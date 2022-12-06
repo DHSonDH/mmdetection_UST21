@@ -22,7 +22,7 @@ class BBoxHead(BaseModule):
                  with_reg=True,
                  roi_feat_size=7,
                  in_channels=256,
-                 num_classes=80,
+                 num_classes=2, #FIXME
                  bbox_coder=dict(
                      type='DeltaXYWHBBoxCoder',
                      clip_border=True,
@@ -68,7 +68,7 @@ class BBoxHead(BaseModule):
             if self.custom_cls_channels:
                 cls_channels = self.loss_cls.get_cls_channels(self.num_classes)
             else:
-                cls_channels = num_classes + 1
+                cls_channels = num_classes + 1  # add background
             self.fc_cls = build_linear_layer(
                 self.cls_predictor_cfg,
                 in_features=in_channels,

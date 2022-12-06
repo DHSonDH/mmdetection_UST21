@@ -1,8 +1,10 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+from tkinter.messagebox import NO
 import warnings
+from numpy import dtype
 
 import torch
-
+import torch.nn as nn
 from ..builder import DETECTORS, build_backbone, build_head, build_neck
 from .base import BaseDetector
 
@@ -29,7 +31,27 @@ class TwoStageDetector(BaseDetector):
             warnings.warn('DeprecationWarning: pretrained is deprecated, '
                           'please use "init_cfg" instead')
             backbone.pretrained = pretrained
+
         self.backbone = build_backbone(backbone)
+        
+        if train_cfg != None:
+            obs_cfgs = train_cfg['obs']
+        else:
+            obs_cfgs = test_cfg['obs']
+
+        self.obs_feat_extractor = nn.Sequential(
+                                    nn.Linear(obs_cfgs.input_dim, obs_cfgs.hid_dim, bias=True),
+                                    nn.BatchNorm1d(obs_cfgs.hid_dim),
+                                    nn.ReLU(inplace=True),
+                                    nn.Linear(obs_cfgs.hid_dim, obs_cfgs.hid_dim*2, bias=True),
+                                    nn.BatchNorm1d(obs_cfgs.hid_dim*2),
+                                    nn.ReLU(inplace=True))
+
+        # self.concat_mlp = nn.Sequential(
+        #                 nn.Linear(args.hid_dim + args.backbone_hid_dim // 2, args.concat_hid_dim, bias=True),
+        #                 nn.ReLU(inplace=True),
+        #                 nn.Linear(args.concat_hid_dim, args.output_dim, bias=True))
+
 
         if neck is not None:
             self.neck = build_neck(neck)
@@ -62,12 +84,16 @@ class TwoStageDetector(BaseDetector):
         """bool: whether the detector has a RoI head"""
         return hasattr(self, 'roi_head') and self.roi_head is not None
 
-    def extract_feat(self, img):
+    def extract_feat(self, img, obs):  # FIXME extract_feat(self, img)
         """Directly extract features from the backbone+neck."""
-        x = self.backbone(img)
+        x = self.backbone(img)  # torch.Size([16, 96, 200, 200]) torch.Size([16, 192, 100, 100]) torch.Size([16, 384, 50, 50]) torch.Size([16, 768, 25, 25])
         if self.with_neck:
-            x = self.neck(x)
-        return x
+            x = self.neck(x)  # torch.Size([16, 256, 200, 200]) torch.Size([16, 256, 100, 100]) torch.Size([16, 256, 50, 50]) torch.Size([16, 256, 25, 25])
+        
+        obs_edit = torch.stack(obs[0], dim=1).float()
+        x_obs = self.obs_feat_extractor(obs_edit)
+        
+        return x, x_obs
 
     def forward_dummy(self, img):
         """Used for computing network flops.
@@ -124,7 +150,7 @@ class TwoStageDetector(BaseDetector):
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
-        x = self.extract_feat(img)
+        x, x_obs = self.extract_feat(img, kwargs['obs'])  # FIXME
 
         losses = dict()
 
@@ -144,7 +170,7 @@ class TwoStageDetector(BaseDetector):
         else:
             proposal_list = proposals
 
-        roi_losses = self.roi_head.forward_train(x, img_metas, proposal_list,
+        roi_losses = self.roi_head.forward_train(x, x_obs, img_metas, proposal_list,
                                                  gt_bboxes, gt_labels,
                                                  gt_bboxes_ignore, gt_masks,
                                                  **kwargs)
@@ -170,18 +196,19 @@ class TwoStageDetector(BaseDetector):
         return await self.roi_head.async_simple_test(
             x, proposal_list, img_meta, rescale=rescale)
 
-    def simple_test(self, img, img_metas, proposals=None, rescale=False):
+    def simple_test(self, img, img_metas, proposals=None, rescale=False, **kwargs):
         """Test without augmentation."""
 
         assert self.with_bbox, 'Bbox head must be implemented.'
-        x = self.extract_feat(img)
+        x, x_obs = self.extract_feat(img, kwargs['obs'][0])  # train과 달리, test에는 obs가 list한겹 더 쌓임..
+
         if proposals is None:
             proposal_list = self.rpn_head.simple_test_rpn(x, img_metas)
         else:
             proposal_list = proposals
 
         return self.roi_head.simple_test(
-            x, proposal_list, img_metas, rescale=rescale)
+            x, x_obs, proposal_list, img_metas, rescale=rescale)
 
     def aug_test(self, imgs, img_metas, rescale=False):
         """Test with augmentations.

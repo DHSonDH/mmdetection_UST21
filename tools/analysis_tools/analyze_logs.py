@@ -32,7 +32,6 @@ def cal_train_time(log_dicts, args):
               f'average time is {epoch_ave_time[fastest_epoch]:.4f}')
         print(f'time std over epochs is {std_over_epoch:.4f}')
         print(f'average iter time: {np.mean(all_times):.4f} s/iter')
-        print()
 
 
 def plot_curve(log_dicts, args):

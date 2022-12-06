@@ -1,3 +1,6 @@
+# modified version of original mmdetection project for NIA_ripcurrent detection
+Modified by DooHwanSon, UST21
+
 <div align="center">
   <img src="resources/mmdet-logo.png" width="600"/>
   <div>&nbsp;</div>

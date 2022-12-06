@@ -209,7 +209,7 @@ def train_detector(model,
             dist=distributed,
             shuffle=False,
             persistent_workers=False)
-
+        # TODO: change validaton evaluation samples_per_gpu ~= 20
         val_dataloader_args = {
             **val_dataloader_default_args,
             **cfg.data.get('val_dataloader', {})

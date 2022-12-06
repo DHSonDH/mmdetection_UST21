@@ -100,7 +100,8 @@ class SingleRoIExtractor(BaseRoIExtractor):
             inds = mask.nonzero(as_tuple=False).squeeze(1)
             if inds.numel() > 0:
                 rois_ = rois[inds]
-                roi_feats_t = self.roi_layers[i](feats[i], rois_)
+                roi_feats_t = self.roi_layers[i](feats[i], rois_)  # 여기서 batch size 뭉개짐, 한 batch 의 몇번이 idx 몇으로 가는지 알 수 없음
+                # roi_align.py 95번째 함수를 분석해야하지만 _ext.cpython-38-x86_64-linux-gnu.so 이 함수를 불러올 수 없음...
                 roi_feats[inds] = roi_feats_t
             else:
                 # Sometimes some pyramid levels will not be used for RoI

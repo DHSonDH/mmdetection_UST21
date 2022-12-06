@@ -49,7 +49,7 @@ class BBoxTestMixin:
             return det_bboxes, det_labels
 
     def simple_test_bboxes(self,
-                           x,
+                           x, x_obs,
                            img_metas,
                            proposals,
                            rcnn_test_cfg,
@@ -74,7 +74,11 @@ class BBoxTestMixin:
         """
 
         rois = bbox2roi(proposals)
-
+        #FIXME
+        idxes = []  # roi 만들 때 각 roi 가 몇번째 batch element인지 정보 기록
+        for i, pp in enumerate(proposals):
+            idxes.extend([i for _ in range(pp.shape[0])])
+            
         if rois.shape[0] == 0:
             batch_size = len(proposals)
             det_bbox = rois.new_zeros(0, 5)
@@ -86,7 +90,8 @@ class BBoxTestMixin:
             # There is no proposal in the whole batch
             return [det_bbox] * batch_size, [det_label] * batch_size
 
-        bbox_results = self._bbox_forward(x, rois)
+        bbox_results = self._bbox_forward(x, x_obs, rois,
+                                          is_test=True, test_batch_bb_idx=idxes)
         img_shapes = tuple(meta['img_shape'] for meta in img_metas)
         scale_factors = tuple(meta['scale_factor'] for meta in img_metas)
 

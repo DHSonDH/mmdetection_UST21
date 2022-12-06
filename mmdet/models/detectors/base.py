@@ -1,14 +1,16 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
 
+import json
 import mmcv
 import numpy as np
 import torch
 import torch.distributed as dist
 from mmcv.runner import BaseModule, auto_fp16
 
-from mmdet.core.visualization import imshow_det_bboxes
+from mmdet.core.visualization import imshow_det_bboxes, imshow_gt_det_bboxes
 
 
 class BaseDetector(BaseModule, metaclass=ABCMeta):
@@ -269,13 +271,16 @@ class BaseDetector(BaseModule, metaclass=ABCMeta):
         return outputs
 
     def show_result(self,
+                    img_path,  #FIXME: i added this to read annotation files together
                     img,
                     result,
-                    score_thr=0.3,
+                    test_show_gt,
+                    test_return_img_when_rip,
+                    score_thr=0.5,
                     bbox_color=(72, 101, 241),
                     text_color=(72, 101, 241),
                     mask_color=None,
-                    thickness=2,
+                    thickness=4,
                     font_size=13,
                     win_name='',
                     show=False,
@@ -310,14 +315,13 @@ class BaseDetector(BaseModule, metaclass=ABCMeta):
             img (Tensor): Only if not `show` or `out_file`
         """
         img = mmcv.imread(img)
-        img = img.copy()
         if isinstance(result, tuple):
             bbox_result, segm_result = result
             if isinstance(segm_result, tuple):
                 segm_result = segm_result[0]  # ms rcnn
         else:
             bbox_result, segm_result = result, None
-        bboxes = np.vstack(bbox_result)
+        bboxes = np.vstack(bbox_result)  # 4(bbox)+1(objectness socre) 개 x 모든 out bboxes
         labels = [
             np.full(bbox.shape[0], i, dtype=np.int32)
             for i, bbox in enumerate(bbox_result)
@@ -334,26 +338,97 @@ class BaseDetector(BaseModule, metaclass=ABCMeta):
         # if out_file specified, do not show image in window
         if out_file is not None:
             show = False
-        # draw bounding boxes
-        img = imshow_det_bboxes(
-            img,
-            bboxes,
-            labels,
-            segms,
-            class_names=self.CLASSES,
-            score_thr=score_thr,
-            bbox_color=bbox_color,
-            text_color=text_color,
-            mask_color=mask_color,
-            thickness=thickness,
-            font_size=font_size,
-            win_name=win_name,
-            show=show,
-            wait_time=wait_time,
-            out_file=out_file)
+
+        if not test_show_gt:
+            # draw bounding boxes
+            img, final_bboxes, final_labels = imshow_det_bboxes(
+                img,
+                test_return_img_when_rip,
+                bboxes,
+                labels,
+                # segms, #FIXME: 마스크 있으면 잘 안보여서 지움
+                class_names=self.CLASSES,
+                score_thr=score_thr,
+                bbox_color=bbox_color,
+                text_color=text_color,
+                mask_color=mask_color,
+                thickness=thickness,
+                font_size=font_size,
+                win_name=win_name,
+                show=show,
+                wait_time=wait_time,
+                out_file=out_file)
+
+        else:
+            # draw pred bbox with gt bbox (mask는 이미지 가리므로 제외)
+            # ===================Read annotation file togther============================
+            ann_pth = '/'.join(img_path.split('/')[:3])+'/annotation/'+img_path.split('/')[-1][:-4]+'.json'
+            with open(ann_pth) as json_file:
+                annot = json.load(json_file)
+            annots = annot['annotations']
+            
+            img_shape = img.shape
+            height = int(img_shape[0])  # 1080
+            width = int(img_shape[1])  # 1920
+
+            bboxes = []
+            labels = []
+            masks_poly = []
+            
+            annotation = {}
+            rois = annots['bounding_count'] + 1 # all image 에 background 1개짜리 줄거니까
+            for idx in range(rois):
+                if idx ==0:
+                    label = 0
+                    # mask_poly = np.array([[0,  0],
+                    #     [width,  0],
+                    #     [width,  height],
+                    #     [0,  height]], dtype=float)
+                    bbox = [0, 0, width, height]  
+                else:
+                    # rip current recording
+                    label = annots['class']  # 0: norip, 1:rip
+                    polys = annots['drawing'][idx-1]  #실제기록은 0부터 되있으므로
+                    # 이미지 좌표계를 따라서 시계방향 order
+                    # mask_poly = np.array(polys).astype(np.double)
+                    polys = [[item[0], item[1]] for item in polys]  # width height 좌표계 다른 것 보정
+                    poly1, _, poly3, _ = polys
+                    bbox = [poly1[0], poly1[1], poly3[0], poly3[1]]  # x1, y1, x2, y2
+
+                labels.append(label)  # 한 이미지가 가지는 모든 bbox 라벨들 + background labeling
+                bboxes.append(bbox)
+                # masks_poly.append(mask_poly)
+
+            annotation['gt_bboxes'] = np.array(bboxes)
+            annotation['gt_labels'] = np.array(labels)
+            # annotation['gt_masks'] = np.array(masks_poly)
+            # ==============================================================================
+
+            img, final_bboxes, final_labels = imshow_gt_det_bboxes(
+                img,
+                annotation,
+                result,
+                test_return_img_when_rip,
+                class_names=self.CLASSES,
+                score_thr=score_thr,
+                gt_bbox_color=(61, 102, 255),
+                gt_text_color=(200, 200, 200),
+                gt_mask_color=(61, 102, 255),
+                det_bbox_color=(241, 101, 72),  # bbox_color
+                det_text_color=(200, 200, 200),  # text_color
+                det_mask_color=(241, 101, 72),  # masl_color
+                thickness=thickness,
+                font_size=font_size,
+                win_name=win_name,
+                show=show,
+                wait_time=0,
+                out_file=out_file,
+                overlay_gt_pred=True)
 
         if not (show or out_file):
             return img
+
+        return final_bboxes, final_labels
 
     def onnx_export(self, img, img_metas):
         raise NotImplementedError(f'{self.__class__.__name__} does '

@@ -282,11 +282,15 @@ class ResultVisualizer:
 def parse_args():
     parser = argparse.ArgumentParser(
         description='MMDet eval image prediction result for each')
-    parser.add_argument('config', help='test config file path')
+    parser.add_argument('--config',
+        default='./NIA_workdir/mask_rcnn_swin-t-p4-w7_fpn_fp16_ms-crop-3x_NIA.py',
+        help='test config file path')
     parser.add_argument(
-        'prediction_path', help='prediction path where test pkl result')
+        'prediction_path', default= 'TODO:',
+        help='prediction path where test pkl result')
     parser.add_argument(
-        'show_dir', help='directory where painted images will be saved')
+        'show_dir', default= '/home/sdh/mmdetection/Result',
+        help='directory where painted images will be saved')
     parser.add_argument('--show', action='store_true', help='show results')
     parser.add_argument(
         '--wait-time',
@@ -306,7 +310,7 @@ def parse_args():
         help='score threshold (default: 0.)')
     parser.add_argument(
         '--overlay-gt-pred',
-        action='store_true',
+        action='store_true', default=True,
         help='whether to plot gts and predictions on the same image.'
         'If False, predictions and gts will be plotted on two same'
         'image which will be concatenated in vertical direction.'
